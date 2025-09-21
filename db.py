@@ -1,81 +1,48 @@
-import sqlite3
-from datetime import datetime
+import asyncpg
+import os
 
-DB_PATH = "tasks.db"
+DB_URL = os.environ.get("DATABASE_URL")  # Render даст эту переменную
 
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""CREATE TABLE IF NOT EXISTS reminders(
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 user_id INTEGER,
-                 time TEXT,
-                 task TEXT)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS repeating(
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 user_id INTEGER,
-                 type TEXT,
-                 data TEXT,
-                 task TEXT)""")
-    conn.commit()
-    conn.close()
+async def init_db():
+    conn = await asyncpg.connect(DB_URL)
+    await conn.execute("""
+    CREATE TABLE IF NOT EXISTS tasks (
+        id SERIAL PRIMARY KEY,
+        user_id BIGINT,
+        time TIMESTAMP,
+        task TEXT,
+        repeating TEXT DEFAULT NULL
+    )
+    """)
+    await conn.close()
 
 
-def add_reminder(user_id, remind_time: datetime, task: str):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("INSERT INTO reminders(user_id,time,task) VALUES (?,?,?)",
-              (user_id, remind_time.isoformat(), task))
-    conn.commit()
-    conn.close()
+async def add_task(user_id, remind_time, task, repeating=None):
+    conn = await asyncpg.connect(DB_URL)
+    await conn.execute(
+        "INSERT INTO tasks(user_id, time, task, repeating) VALUES($1,$2,$3,$4)",
+        user_id, remind_time, task, repeating
+    )
+    await conn.close()
 
 
-def get_reminders(user_id=None):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+async def get_tasks(user_id=None):
+    conn = await asyncpg.connect(DB_URL)
     if user_id:
-        c.execute("SELECT id,user_id,time,task FROM reminders WHERE user_id=?", (user_id,))
+        rows = await conn.fetch("SELECT * FROM tasks WHERE user_id=$1 ORDER BY id", user_id)
     else:
-        c.execute("SELECT id,user_id,time,task FROM reminders")
-    data = c.fetchall()
-    conn.close()
-    return data
+        rows = await conn.fetch("SELECT * FROM tasks ORDER BY id")
+    await conn.close()
+    return rows
 
 
-def delete_reminder(rid):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM reminders WHERE id=?", (rid,))
-    conn.commit()
-    conn.close()
+async def delete_task(task_id):
+    conn = await asyncpg.connect(DB_URL)
+    await conn.execute("DELETE FROM tasks WHERE id=$1", task_id)
+    await conn.close()
 
 
-def add_repeating(user_id, typ, data, task):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("INSERT INTO repeating(user_id,type,data,task) VALUES (?,?,?,?)",
-              (user_id, typ, data, task))
-    conn.commit()
-    conn.close()
-
-
-def get_repeating(user_id=None):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    if user_id:
-        c.execute("SELECT id,user_id,type,data,task FROM repeating WHERE user_id=?", (user_id,))
-    else:
-        c.execute("SELECT id,user_id,type,data,task FROM repeating")
-    data = c.fetchall()
-    conn.close()
-    return data
-
-
-def clear_user_tasks(uid):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM reminders WHERE user_id=?", (uid,))
-    c.execute("DELETE FROM repeating WHERE user_id=?", (uid,))
-    conn.commit()
-    conn.close()
+async def clear_tasks(user_id):
+    conn = await asyncpg.connect(DB_URL)
+    await conn.execute("DELETE FROM tasks WHERE user_id=$1", user_id)
+    await conn.close()
